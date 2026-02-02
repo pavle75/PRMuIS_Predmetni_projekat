@@ -61,7 +61,8 @@ namespace Server
             Log("Server pokrenut...");
             txtStatus.Text = "Server aktivan";
 
-            await PokreniUdpServer(udpPort);
+            PokreniUdpServer(udpPort);
+            PokreniTcpServer();
         }
 
         private async Task PokreniUdpServer(int port)
@@ -94,7 +95,7 @@ namespace Server
                         igraci.Add(noviIgrac);
                         Log($"Igrač {igracId} se prijavio sa {remoteEP}");
 
-                        string odgovor = $"TCP:{tcpPort}";
+                        string odgovor = $"TCP:{tcpPort},ID:{igracId}";
                         byte[] data = Encoding.UTF8.GetBytes(odgovor);
                         await Task.Run(() => udpSocket.SendTo(data, remoteEP));
 
@@ -105,7 +106,6 @@ namespace Server
 
                 udpSocket.Close();
                 Log("Svi igrači prijavljeni, pokrećem TCP server...");
-                await PokreniTcpServer();
             }
             catch (Exception ex)
             {
@@ -136,6 +136,7 @@ namespace Server
 
                 await PosaljiParametreIgre();
                 await PrimiPodmornice();
+                await PokreniPolling();
             }
             catch (Exception ex)
             {
@@ -182,7 +183,10 @@ namespace Server
                 igrac.Tabla = new int[dimenzija, dimenzija];
 
                 Log($"Igrač {igrac.Id} postavio podmornice: {podmornice}");
+            }
 
+            foreach (var igrac in igraci)
+            {
                 string potvrda = "PODMORNICE_PRIMLJENE";
                 byte[] data = Encoding.UTF8.GetBytes(potvrda);
 
@@ -192,6 +196,19 @@ namespace Server
                     igrac.TcpSocket.Send(data);
                     igrac.TcpSocket.Blocking = false;
                 });
+            }
+        }
+
+        private async Task PokreniPolling()
+        {
+            while (serverPokrenut)
+            {
+                foreach (var igrac in igraci.Where(i => i.Aktivan))
+                {
+                    if(igrac.TcpSocket.Poll(1000 * 1000, SelectMode.SelectRead))
+                        ObradiPoruku(igrac);
+                }
+                await Task.Delay(100);
             }
         }
 

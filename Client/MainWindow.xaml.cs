@@ -66,8 +66,10 @@ namespace Client
 
                 if (odgovor.StartsWith("TCP:"))
                 {
-                    int tcpPort = int.Parse(odgovor.Split(':')[1]);
+                    var odgovori = odgovor.Split(',');
+                    int tcpPort = int.Parse(odgovori[0].Split(':')[1]);
                     Log($"Primljena TCP informacija, port: {tcpPort}");
+                    mojId = int.Parse(odgovori[1].Split(':')[1]);
 
                     await PoveziSeNaTcp(serverIp, tcpPort);
                 }
@@ -109,6 +111,7 @@ namespace Client
 
                 grpStatus.Visibility = Visibility.Visible;
                 txtStatus.Text = "Status: Povezan";
+                txtMojId.Text = $"Moj ID: {mojId}";
                 txtInfo.Text = poruka;
 
                 grpPodmornice.Visibility = Visibility.Visible;
@@ -117,6 +120,7 @@ namespace Client
             catch (Exception ex)
             {
                 MessageBox.Show($"Greška pri TCP povezivanju: {ex.Message}");
+                btnPrijavi.IsEnabled = true;
             }
         }
 
@@ -317,7 +321,8 @@ namespace Client
             {
                 string poruka = $"IZABERI:{trenutniProtivnik}";
                 byte[] data = Encoding.UTF8.GetBytes(poruka);
-                await Task.Run(() => tcpSocket.Send(data));
+                Task.Run(() => tcpSocket.Send(data));
+                await PrimiPoruku();
             }
             catch (Exception ex)
             {
