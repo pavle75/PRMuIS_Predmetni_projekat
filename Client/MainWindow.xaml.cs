@@ -22,11 +22,14 @@ namespace Client
         private int dimenzija;
         private int maxPromasaji;
         private List<int> odabranaPolja = new List<int>();
+        private List<int> svaPoljaPodmornica = new List<int>();
         private List<Button> dugmadPodmornice = new List<Button>();
         private List<Button> dugmadTabla = new List<Button>();
         private int trenutniProtivnik = -1;
         private DispatcherTimer pollTimer;
-        private bool mojaVrsta = true;
+        private bool mojRed = true;
+        private int brojPolja = 3;
+        private bool igraTraje = true;
 
         public MainWindow()
         {
@@ -57,19 +60,19 @@ namespace Client
 
                 byte[] data = Encoding.UTF8.GetBytes("PRIJAVA");
                 await Task.Run(() => udpSocket.SendTo(data, serverEndPoint));
+                Log("Prijava poslata, čekam odgovor...");
 
                 byte[] buffer = new byte[1024];
                 EndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
 
                 int bytesReceived = await Task.Run(() => udpSocket.ReceiveFrom(buffer, ref remoteEP));
                 string odgovor = Encoding.UTF8.GetString(buffer, 0, bytesReceived);
+                Log($"Primljen odgovor: {odgovor}");
 
                 if (odgovor.StartsWith("TCP:"))
                 {
-                    var odgovori = odgovor.Split(',');
-                    int tcpPort = int.Parse(odgovori[0].Split(':')[1]);
+                    int tcpPort = int.Parse(odgovor.Split(':')[1]);
                     Log($"Primljena TCP informacija, port: {tcpPort}");
-                    mojId = int.Parse(odgovori[1].Split(':')[1]);
 
                     await PoveziSeNaTcp(serverIp, tcpPort);
                 }
@@ -79,6 +82,7 @@ namespace Client
             catch (Exception ex)
             {
                 MessageBox.Show($"Greška pri prijavi: {ex.Message}");
+                Log($"GREŠKA: {ex.Message}");
                 btnPrijavi.IsEnabled = true;
             }
         }
@@ -92,7 +96,7 @@ namespace Client
 
                 await Task.Run(() => tcpSocket.Connect(serverEndPoint));
 
-                tcpSocket.Blocking = false;             // ovo sam postavio radi pollinga
+                tcpSocket.Blocking = false;
 
                 Log("Povezan sa TCP serverom");
 
@@ -177,26 +181,129 @@ namespace Client
 
             if (odabranaPolja.Contains(polje))
             {
+                var poljaZaUklanjanje = DobijPoljaLPodmornice(polje);
+
+                foreach (var p in poljaZaUklanjanje)
+                {
+                    svaPoljaPodmornica.Remove(p);
+                    var dugme = dugmadPodmornice.FirstOrDefault(d => (int)d.Tag == p);
+                    if (dugme != null)
+                    {
+                        dugme.Background = SystemColors.ControlBrush;
+                    }
+                }
+
                 odabranaPolja.Remove(polje);
-                btn.Background = SystemColors.ControlBrush;
             }
             else
             {
-                if (odabranaPolja.Count < 9)
+                if (odabranaPolja.Count < brojPolja)
                 {
-                    odabranaPolja.Add(polje);
-                    btn.Background = Brushes.LightBlue;
+                    if (MozePostavitiLPodmornicu(polje))
+                    {
+                        odabranaPolja.Add(polje);
+
+                        var poljaLPodmornice = DobijPoljaLPodmornice(polje);
+
+                        foreach (var p in poljaLPodmornice)
+                        {
+                            svaPoljaPodmornica.Add(p);
+                            var dugme = dugmadPodmornice.FirstOrDefault(d => (int)d.Tag == p);
+                            if (dugme != null)
+                            {
+                                if (p == polje)
+                                    dugme.Background = Brushes.DarkBlue;
+                                else
+                                    dugme.Background = Brushes.LightBlue;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        MessageBox.Show("Ne možete postaviti podmornicu ovde!");
+                    }
                 }
             }
 
             odabranaPolja.Sort();
             txtOdabranaPolja.Text = string.Join(", ", odabranaPolja);
-            btnPosaljiPodmornice.IsEnabled = odabranaPolja.Count == 9 && ValidirajPodmornice();
+            btnPosaljiPodmornice.IsEnabled = odabranaPolja.Count == brojPolja;
+        }
+
+        private List<int> DobijPoljaLPodmornice(int gornjePolje)
+        {
+            List<int> polja = new List<int> { gornjePolje };
+
+            int donjeLeviPolje = gornjePolje + dimenzija;
+            int donjeDesnoPolje = donjeLeviPolje + 1;
+
+            polja.Add(donjeLeviPolje);
+            polja.Add(donjeDesnoPolje);
+
+            return polja;
+        }
+
+        private bool MozePostavitiLPodmornicu(int gornjePolje)
+        {
+            int red = (gornjePolje - 1) / dimenzija;
+            int kol = (gornjePolje - 1) % dimenzija;
+
+            if (red + 1 >= dimenzija) return false;
+            if (kol + 1 >= dimenzija) return false;
+
+            var poljaLPodmornice = DobijPoljaLPodmornice(gornjePolje);
+
+            foreach (var polje in poljaLPodmornice)
+            {
+                if (svaPoljaPodmornica.Contains(polje))
+                    return false;
+            }
+
+            foreach (var polje in poljaLPodmornice)
+            {
+                var susedi = DobijSusede(polje);
+
+                foreach (var sused in susedi)
+                {
+                    if (poljaLPodmornice.Contains(sused))
+                        continue;
+
+                    if (svaPoljaPodmornica.Contains(sused))
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        private List<int> DobijSusede(int polje)
+        {
+            List<int> susedi = new List<int>();
+
+            int red = (polje - 1) / dimenzija;
+            int kol = (polje - 1) % dimenzija;
+
+            int[] deltaRed = { -1, -1, 0, 1, 1, 1, 0, -1 };
+            int[] deltaKol = { 0, 1, 1, 1, 0, -1, -1, -1 };
+
+            for (int i = 0; i < 8; i++)
+            {
+                int noviRed = red + deltaRed[i];
+                int novaKol = kol + deltaKol[i];
+
+                if (noviRed >= 0 && noviRed < dimenzija && novaKol >= 0 && novaKol < dimenzija)
+                {
+                    int susednoPolje = noviRed * dimenzija + novaKol + 1;
+                    susedi.Add(susednoPolje);
+                }
+            }
+
+            return susedi;
         }
 
         private bool ValidirajPodmornice()
         {
-            return true;
+            return odabranaPolja.Count == brojPolja;
         }
 
         private async void BtnPosaljiPodmornice_Click(object sender, RoutedEventArgs e)
@@ -209,7 +316,7 @@ namespace Client
 
             try
             {
-                string poruka = string.Join(",", odabranaPolja);
+                string poruka = string.Join(",", svaPoljaPodmornica.OrderBy(p => p));
                 byte[] data = Encoding.UTF8.GetBytes(poruka);
 
                 await Task.Run(() =>
@@ -259,6 +366,27 @@ namespace Client
                 }
             }
 
+            pollTimer = new DispatcherTimer();
+            pollTimer.Interval = TimeSpan.FromMilliseconds(100);
+            pollTimer.Tick += async (s, e) =>
+            {
+                try
+                {
+                    if (tcpSocket != null && tcpSocket.Poll(0, SelectMode.SelectRead))
+                    {
+                        if (tcpSocket.Available > 0)
+                        {
+                            await PrimiPoruku();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"Greška polling: {ex.Message}");
+                }
+            };
+            pollTimer.Start();
+
             Log("Igra je počela!");
         }
 
@@ -296,12 +424,12 @@ namespace Client
             {
                 if (se.SocketErrorCode != SocketError.WouldBlock)
                 {
-                    Log($"Socket greška pri primanju poruke: {se.Message}");
+                    Log($"Socket greška: {se.Message}");
                 }
             }
             catch (Exception ex)
             {
-                Log($"Greška pri primanju poruke: {ex.Message}");
+                Log($"Greška pri primanju: {ex.Message}");
             }
         }
 
@@ -321,8 +449,7 @@ namespace Client
             {
                 string poruka = $"IZABERI:{trenutniProtivnik}";
                 byte[] data = Encoding.UTF8.GetBytes(poruka);
-                Task.Run(() => tcpSocket.Send(data));
-                await PrimiPoruku();
+                await Task.Run(() => tcpSocket.Send(data));
             }
             catch (Exception ex)
             {
@@ -379,7 +506,7 @@ namespace Client
 
         private async void BtnGadjaj_Click(object sender, RoutedEventArgs e)
         {
-            if (!mojaVrsta) return;
+            if (!mojRed) return;
 
             Button btn = sender as Button;
             int polje = (int)btn.Tag;
@@ -390,7 +517,7 @@ namespace Client
                 byte[] data = Encoding.UTF8.GetBytes(poruka);
                 await Task.Run(() => tcpSocket.Send(data));
 
-                mojaVrsta = false;
+                mojRed = false;
             }
             catch (Exception ex)
             {
@@ -407,6 +534,7 @@ namespace Client
             if (rezultat.Contains("PROMASIO"))
             {
                 txtRezultat.Text = "PROMAŠIO!";
+
                 Log("Promašio si!");
             }
             else if (rezultat.Contains("POGODIO"))
@@ -426,12 +554,9 @@ namespace Client
 
             // dodati i logiku za eliminisanje protivnika ako je potopljen
 
-            mojaVrsta = ponovnoPucanje;
+            mojRed = ponovnoPucanje;
 
-            if (mojaVrsta)
-            {
-                ZatraziTablu();
-            }
+            ZatraziTablu();
         }
 
         private void Log(string poruka)

@@ -14,12 +14,13 @@ namespace Server
     {
         private Socket udpSocket;
         private Socket tcpSocket;
-        private List<Igrac> igraci = new List<Igrac>();
+        public List<Igrac> igraci = new List<Igrac>();
         private int brojIgraca;
         private int dimenzija;
         private int maxPromasaji;
         private bool serverPokrenut = false;
         private int tcpPort = 5001;
+        private DispatcherTimer pollTimer;
 
         public MainWindow()
         {
@@ -61,8 +62,8 @@ namespace Server
             Log("Server pokrenut...");
             txtStatus.Text = "Server aktivan";
 
-            PokreniUdpServer(udpPort);
-            PokreniTcpServer();
+            await PokreniUdpServer(udpPort);
+            await PokreniTcpServer();
         }
 
         private async Task PokreniUdpServer(int port)
@@ -74,6 +75,8 @@ namespace Server
                 udpSocket.Bind(localEP);
 
                 Log($"UDP socket sluša na portu {port}");
+
+                List<EndPoint> igracEndPoints = new List<EndPoint>();
 
                 while (igraci.Count < brojIgraca)
                 {
@@ -88,24 +91,34 @@ namespace Server
                         int igracId = igraci.Count + 1;
                         Igrac noviIgrac = new Igrac
                         {
-                            Id = igracId,
-                            UdpEndPoint = (IPEndPoint)remoteEP
+                            Id = igracId
                         };
 
                         igraci.Add(noviIgrac);
+                        igracEndPoints.Add(remoteEP);
+
                         Log($"Igrač {igracId} se prijavio sa {remoteEP}");
 
-                        string odgovor = $"TCP:{tcpPort},ID:{igracId}";
-                        byte[] data = Encoding.UTF8.GetBytes(odgovor);
-                        await Task.Run(() => udpSocket.SendTo(data, remoteEP));
-
-                        txtPrijavljeni.Text = $"Prijavljeni igrači: {igraci.Count}/{brojIgraca}";
-                        lstIgraci.Items.Add($"Igrač {igracId} - {remoteEP}");
+                        await Dispatcher.InvokeAsync(() =>
+                        {
+                            txtPrijavljeni.Text = $"Prijavljeni igrači: {igraci.Count}/{brojIgraca}";
+                            lstIgraci.Items.Add($"Igrač {igracId} - {remoteEP}");
+                        });
                     }
                 }
 
+                Log("Svi igrači prijavljeni! Šaljem TCP informacije...");
+
+                for (int i = 0; i < igraci.Count; i++)
+                {
+                    string odgovor = $"TCP:{tcpPort}";
+                    byte[] data = Encoding.UTF8.GetBytes(odgovor);
+                    await Task.Run(() => udpSocket.SendTo(data, igracEndPoints[i]));
+                    Log($"TCP info poslata igraču {igraci[i].Id}");
+                }
+
                 udpSocket.Close();
-                Log("Svi igrači prijavljeni, pokrećem TCP server...");
+                Log("UDP server zatvoren, pokrećem TCP server...");
             }
             catch (Exception ex)
             {
@@ -136,7 +149,7 @@ namespace Server
 
                 await PosaljiParametreIgre();
                 await PrimiPodmornice();
-                await PokreniPolling();
+                PokreniPolling();
             }
             catch (Exception ex)
             {
@@ -177,9 +190,7 @@ namespace Server
                 });
 
                 string podmornice = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-
                 igrac.Podmornice = podmornice.Split(',').Select(int.Parse).ToList();
-
                 igrac.Tabla = new int[dimenzija, dimenzija];
 
                 Log($"Igrač {igrac.Id} postavio podmornice: {podmornice}");
@@ -197,22 +208,41 @@ namespace Server
                     igrac.TcpSocket.Blocking = false;
                 });
             }
+
+            Log("Potvrde poslate svim igračima");
         }
 
-        private async Task PokreniPolling()
+        private void PokreniPolling()
         {
-            while (serverPokrenut)
+            Log("Pokretanje polling-a...");
+
+            pollTimer = new DispatcherTimer();
+            pollTimer.Interval = TimeSpan.FromMilliseconds(100);
+            pollTimer.Tick += async (s, e) =>
             {
                 foreach (var igrac in igraci.Where(i => i.Aktivan))
                 {
-                    if(igrac.TcpSocket.Poll(1000 * 1000, SelectMode.SelectRead))
-                        ObradiPoruku(igrac);
+                    try
+                    {
+                        if (igrac.TcpSocket.Poll(0, SelectMode.SelectRead))
+                        {
+                            if (igrac.TcpSocket.Available > 0)
+                            {
+                                await ObradiPoruku(igrac);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Greška polling: {ex.Message}");
+                    }
                 }
-                await Task.Delay(100);
-            }
+            };
+            pollTimer.Start();
+            Log("Polling aktivan!");
         }
 
-        private async Task ObradiPoruku(Igrac igrac)    // ovo trebas pozvati kad implemetiras polling
+        private async Task ObradiPoruku(Igrac igrac)
         {
             try
             {
@@ -271,7 +301,6 @@ namespace Server
             int kol = (polje - 1) % dimenzija;
 
             string rezultat;
-            bool ponovnoPucanje = false;
 
             if (protivnik.Tabla[red, kol] != 0)
             {
@@ -283,17 +312,16 @@ namespace Server
 
                 napadac.BrojPogodaka++;
 
-                //protivnik.Podmornice.Remove(polje);
 
                 if (JePotopljena(protivnik, polje))
                 {
                     rezultat = "POTOPIO";
-                    ponovnoPucanje = true;
+                    napadac.Aktivan = true;
                 }
                 else
                 {
                     rezultat = "POGODIO";
-                    ponovnoPucanje = true;
+                    napadac.Aktivan = true;
                 }
 
                 Log($"Igrač {napadac.Id} -> Igrač {protivnik.Id}: polje {polje}, {rezultat}");
@@ -306,17 +334,53 @@ namespace Server
 
                 rezultat = "PROMASIO";
 
+                protivnik.Aktivan = true;
+                napadac.Aktivan = false;
+
                 Log($"Igrač {napadac.Id} -> Igrač {protivnik.Id}: polje {polje}, {rezultat}");
+
+                string odgovorProtivniku = $"REZULTAT:{rezultat}:{(napadac.Aktivan ? "PONOVO" : "KRAJ")}";
+                byte[] dataProtivniku = Encoding.UTF8.GetBytes(odgovorProtivniku);
+                await Task.Run(() => protivnik.TcpSocket.Send(dataProtivniku));
             }
 
-            string odgovor = $"REZULTAT:{rezultat}:{(ponovnoPucanje ? "PONOVO" : "KRAJ")}";
+            string odgovor = $"REZULTAT:{rezultat}:{(napadac.Aktivan ? "PONOVO" : "KRAJ")}";
             byte[] data = Encoding.UTF8.GetBytes(odgovor);
             await Task.Run(() => napadac.TcpSocket.Send(data));
         }
 
         private bool JePotopljena(Igrac igrac, int polje)
         {
-            return true;
+            int red = (polje - 1) / dimenzija;
+            int kol = (polje - 1) % dimenzija;
+
+            try
+            {
+                if (red - 1 >= 0 && kol + 1 < igrac.Tabla.GetLength(1))
+                {
+                    if (igrac.Tabla[red - 1, kol] == 2 && igrac.Tabla[red, kol + 1] == 2)
+                        return true;
+                }
+
+                if (red + 1 < igrac.Tabla.GetLength(0) && kol + 1 < igrac.Tabla.GetLength(1))
+                {
+                    if (igrac.Tabla[red + 1, kol] == 2 && igrac.Tabla[red + 1, kol + 1] == 2)
+                        return true;
+                }
+
+                if (red - 1 >= 0 && kol - 1 >= 0)
+                {
+                    if (igrac.Tabla[red, kol - 1] == 2 && igrac.Tabla[red - 1, kol - 1] == 2)
+                        return true;
+                }
+
+            }
+            catch (Exception ex)
+            {
+                Log($"Greška pri provjeri potopljenosti: {ex.Message}");
+            }
+
+            return false;
         }
 
         private string GenerisiTablu(Igrac igrac)
