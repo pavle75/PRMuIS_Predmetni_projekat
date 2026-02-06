@@ -71,8 +71,11 @@ namespace Client
 
                 if (odgovor.StartsWith("TCP:"))
                 {
-                    int tcpPort = int.Parse(odgovor.Split(':')[1]);
-                    Log($"Primljena TCP informacija, port: {tcpPort}");
+                    var delovi = odgovor.Split(',');
+                    int tcpPort = int.Parse(delovi[0].Split(':')[1]);
+                    mojId = int.Parse(delovi[1].Split(':')[1]);
+
+                    Log($"Primljena TCP informacija - Port: {tcpPort}, Moj ID: {mojId}");
 
                     await PoveziSeNaTcp(serverIp, tcpPort);
                 }
@@ -316,8 +319,11 @@ namespace Client
 
             try
             {
-                string poruka = string.Join(",", svaPoljaPodmornica.OrderBy(p => p));
+                string poruka = $"{mojId}|";
+                string poruka1 = string.Join(",", svaPoljaPodmornica.OrderBy(p => p));
+                poruka += poruka1;
                 byte[] data = Encoding.UTF8.GetBytes(poruka);
+                Log($"{poruka}");
 
                 await Task.Run(() =>
                 {
@@ -406,7 +412,26 @@ namespace Client
 
                 string poruka = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
-                if (poruka.StartsWith("TABLA:"))
+                if (poruka == "TVOJ_POTEZ")
+                {
+                    mojRed = true;
+                    txtRezultat.Text = "TVOJ POTEZ! Izaberi protivnika i gađaj!";
+                    txtRezultat.Foreground = Brushes.Green;
+                    Log("Tvoj potez!");
+                }
+                else if (poruka == "CEKAJ_RED")
+                {
+                    mojRed = false;
+                    txtRezultat.Text = "Čekaj svoj red...";
+                    txtRezultat.Foreground = Brushes.Gray;
+                    Log("Čekaj svoj red");
+                }
+                else if (poruka == "NIJE_TVOJ_POTEZ")
+                {
+                    MessageBox.Show("Nije tvoj potez! Sačekaj red.");
+                    Log("Pokušaj gađanja van poteza!");
+                }
+                else if (poruka.StartsWith("TABLA:"))
                 {
                     string tabla = poruka.Substring(6);
                     PrikaziTablu(tabla);
@@ -417,7 +442,7 @@ namespace Client
                 }
                 else if (poruka.StartsWith("KRAJ:"))
                 {
-                    // Kraj igre
+                    //Kraj igre
                 }
             }
             catch (SocketException se)
@@ -533,30 +558,35 @@ namespace Client
 
             if (rezultat.Contains("PROMASIO"))
             {
-                txtRezultat.Text = "PROMAŠIO!";
-
+                txtRezultat.Text = "PROMAŠIO! Čekaj svoj red...";
+                txtRezultat.Foreground = Brushes.Orange;
                 Log("Promašio si!");
+                mojRed = false;
             }
             else if (rezultat.Contains("POGODIO"))
             {
                 txtRezultat.Text = "POGODIO! Pucaj ponovo!";
+                txtRezultat.Foreground = Brushes.Green;
                 Log("Pogodio si!");
+                mojRed = true;
             }
             else if (rezultat.Contains("POTOPIO"))
             {
                 txtRezultat.Text = "POTOPIO! Pucaj ponovo!";
+                txtRezultat.Foreground = Brushes.DarkGreen;
                 Log("Potopiо si podmornicu!");
+                mojRed = true;
             }
             else if (rezultat == "VEC_GADJANO")
             {
                 txtRezultat.Text = "Već gađano polje!";
+                txtRezultat.Foreground = Brushes.Gray;
             }
 
-            // dodati i logiku za eliminisanje protivnika ako je potopljen
-
-            mojRed = ponovnoPucanje;
-
-            ZatraziTablu();
+            if (mojRed)
+            {
+                ZatraziTablu();
+            }
         }
 
         private void Log(string poruka)

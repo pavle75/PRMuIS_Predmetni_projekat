@@ -4,8 +4,10 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Threading;
 
 namespace Server
@@ -91,7 +93,8 @@ namespace Server
                         int igracId = igraci.Count + 1;
                         Igrac noviIgrac = new Igrac
                         {
-                            Id = igracId
+                            Id = igracId,
+                            Aktivan = (igracId == 1)
                         };
 
                         igraci.Add(noviIgrac);
@@ -111,7 +114,7 @@ namespace Server
 
                 for (int i = 0; i < igraci.Count; i++)
                 {
-                    string odgovor = $"TCP:{tcpPort}";
+                    string odgovor = $"TCP:{tcpPort},ID:{igraci[i].Id}";
                     byte[] data = Encoding.UTF8.GetBytes(odgovor);
                     await Task.Run(() => udpSocket.SendTo(data, igracEndPoints[i]));
                     Log($"TCP info poslata igraču {igraci[i].Id}");
@@ -141,7 +144,6 @@ namespace Server
                 {
                     Socket clientSocket = await Task.Run(() => tcpSocket.Accept());
                     igraci[i].TcpSocket = clientSocket;
-
                     clientSocket.Blocking = false;
 
                     Log($"Igrač {igraci[i].Id} povezan preko TCP-a");
@@ -149,6 +151,7 @@ namespace Server
 
                 await PosaljiParametreIgre();
                 await PrimiPodmornice();
+                await ObavjestiOPocetku();
                 PokreniPolling();
             }
             catch (Exception ex)
@@ -190,9 +193,13 @@ namespace Server
                 });
 
                 string podmornice = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                igrac.Podmornice = podmornice.Split(',').Select(int.Parse).ToList();
-                igrac.Tabla = new int[dimenzija, dimenzija];
-
+                var parts = podmornice.Split('|');
+                int id = int.Parse(parts[0]);
+                Igrac trenutni = igraci.FirstOrDefault(i => i.Id == id);
+                Console.WriteLine($"Primljene podmornice od igrača {trenutni.Id}");
+                trenutni.Podmornice = parts[1].Split(',').Select(int.Parse).ToList();
+                trenutni.Tabla = new int[dimenzija, dimenzija];
+                
                 Log($"Igrač {igrac.Id} postavio podmornice: {podmornice}");
             }
 
@@ -212,6 +219,28 @@ namespace Server
             Log("Potvrde poslate svim igračima");
         }
 
+        private async Task ObavjestiOPocetku()
+        {
+            foreach (var igrac in igraci)
+            {
+                string poruka = igrac.Aktivan ? "TVOJ_POTEZ" : "CEKAJ_RED";
+                byte[] data = Encoding.UTF8.GetBytes(poruka);
+
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        igrac.TcpSocket.Blocking = true;
+                        igrac.TcpSocket.Send(data);
+                        igrac.TcpSocket.Blocking = false;
+                    }
+                    catch { }
+                });
+            }
+
+            Log($"Igrač {igraci.First(i => i.Aktivan).Id} počinje!");
+        }
+
         private void PokreniPolling()
         {
             Log("Pokretanje polling-a...");
@@ -220,7 +249,7 @@ namespace Server
             pollTimer.Interval = TimeSpan.FromMilliseconds(100);
             pollTimer.Tick += async (s, e) =>
             {
-                foreach (var igrac in igraci.Where(i => i.Aktivan))
+                foreach (var igrac in igraci)
                 {
                     try
                     {
@@ -252,11 +281,19 @@ namespace Server
                 if (bytesRead == 0)
                 {
                     Log($"Igrač {igrac.Id} se diskonektovao");
-                    igrac.Aktivan = false;
                     return;
                 }
 
                 string poruka = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+
+                if (!igrac.Aktivan && poruka.StartsWith("GADJAJ:"))
+                {
+                    Log($"Igrač {igrac.Id} pokušao da igra van poteza!");
+                    string greska = "NIJE_TVOJ_POTEZ";
+                    byte[] data = Encoding.UTF8.GetBytes(greska);
+                    await Task.Run(() => igrac.TcpSocket.Send(data));
+                    return;
+                }
 
                 if (poruka.StartsWith("IZABERI:"))
                 {
@@ -301,6 +338,7 @@ namespace Server
             int kol = (polje - 1) % dimenzija;
 
             string rezultat;
+            bool ponovnoPucanje = false;
 
             if (protivnik.Tabla[red, kol] != 0)
             {
@@ -309,19 +347,17 @@ namespace Server
             else if (protivnik.Podmornice.Contains(polje))
             {
                 protivnik.Tabla[red, kol] = 2;
-
                 napadac.BrojPogodaka++;
-
 
                 if (JePotopljena(protivnik, polje))
                 {
                     rezultat = "POTOPIO";
-                    napadac.Aktivan = true;
+                    ponovnoPucanje = true;
                 }
                 else
                 {
                     rezultat = "POGODIO";
-                    napadac.Aktivan = true;
+                    ponovnoPucanje = true;
                 }
 
                 Log($"Igrač {napadac.Id} -> Igrač {protivnik.Id}: polje {polje}, {rezultat}");
@@ -329,24 +365,42 @@ namespace Server
             else
             {
                 protivnik.Tabla[red, kol] = 1;
-
                 napadac.BrojPromasaja++;
-
                 rezultat = "PROMASIO";
-
-                protivnik.Aktivan = true;
-                napadac.Aktivan = false;
 
                 Log($"Igrač {napadac.Id} -> Igrač {protivnik.Id}: polje {polje}, {rezultat}");
 
-                string odgovorProtivniku = $"REZULTAT:{rezultat}:{(napadac.Aktivan ? "PONOVO" : "KRAJ")}";
-                byte[] dataProtivniku = Encoding.UTF8.GetBytes(odgovorProtivniku);
-                await Task.Run(() => protivnik.TcpSocket.Send(dataProtivniku));
+                napadac.Aktivan = false;
+                protivnik.Aktivan = true;
+
+                string porukaProtivniku = "TVOJ_POTEZ";
+                byte[] dataProtivnik = Encoding.UTF8.GetBytes(porukaProtivniku);
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        protivnik.TcpSocket.Blocking = true;
+                        protivnik.TcpSocket.Send(dataProtivnik);
+                        protivnik.TcpSocket.Blocking = false;
+                    }
+                    catch { }
+                });
+
+                Log($"Potez prebačen na igrača {protivnik.Id}");
             }
 
-            string odgovor = $"REZULTAT:{rezultat}:{(napadac.Aktivan ? "PONOVO" : "KRAJ")}";
+            string odgovor = $"REZULTAT:{rezultat}:{(ponovnoPucanje ? "PONOVO" : "KRAJ")}";
             byte[] data = Encoding.UTF8.GetBytes(odgovor);
-            await Task.Run(() => napadac.TcpSocket.Send(data));
+            await Task.Run(() =>
+            {
+                try
+                {
+                    napadac.TcpSocket.Blocking = true;
+                    napadac.TcpSocket.Send(data);
+                    napadac.TcpSocket.Blocking = false;
+                }
+                catch { }
+            });
         }
 
         private bool JePotopljena(Igrac igrac, int polje)
@@ -356,13 +410,13 @@ namespace Server
 
             try
             {
-                if (red - 1 >= 0 && kol + 1 < igrac.Tabla.GetLength(1))
+                if (red - 1 >= 0 && kol + 1 < dimenzija)
                 {
                     if (igrac.Tabla[red - 1, kol] == 2 && igrac.Tabla[red, kol + 1] == 2)
                         return true;
                 }
 
-                if (red + 1 < igrac.Tabla.GetLength(0) && kol + 1 < igrac.Tabla.GetLength(1))
+                if (red + 1 < dimenzija && kol + 1 < dimenzija)
                 {
                     if (igrac.Tabla[red + 1, kol] == 2 && igrac.Tabla[red + 1, kol + 1] == 2)
                         return true;
@@ -373,7 +427,6 @@ namespace Server
                     if (igrac.Tabla[red, kol - 1] == 2 && igrac.Tabla[red - 1, kol - 1] == 2)
                         return true;
                 }
-
             }
             catch (Exception ex)
             {
