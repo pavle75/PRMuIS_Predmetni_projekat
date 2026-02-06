@@ -199,7 +199,7 @@ namespace Server
                 Console.WriteLine($"Primljene podmornice od igrača {trenutni.Id}");
                 trenutni.Podmornice = parts[1].Split(',').Select(int.Parse).ToList();
                 trenutni.Tabla = new int[dimenzija, dimenzija];
-                
+
                 Log($"Igrač {igrac.Id} postavio podmornice: {podmornice}");
             }
 
@@ -370,23 +370,28 @@ namespace Server
 
                 Log($"Igrač {napadac.Id} -> Igrač {protivnik.Id}: polje {polje}, {rezultat}");
 
+                // FIX: Find next player in turn order (round-robin), not just the attacked player
                 napadac.Aktivan = false;
-                protivnik.Aktivan = true;
 
-                string porukaProtivniku = "TVOJ_POTEZ";
-                byte[] dataProtivnik = Encoding.UTF8.GetBytes(porukaProtivniku);
+                int napadacIndex = igraci.IndexOf(napadac);
+                int sledeciIndex = (napadacIndex + 1) % igraci.Count;
+                var sledeciIgrac = igraci[sledeciIndex];
+                sledeciIgrac.Aktivan = true;
+
+                string porukaSledeceg = "TVOJ_POTEZ";
+                byte[] dataSledeci = Encoding.UTF8.GetBytes(porukaSledeceg);
                 await Task.Run(() =>
                 {
                     try
                     {
-                        protivnik.TcpSocket.Blocking = true;
-                        protivnik.TcpSocket.Send(dataProtivnik);
-                        protivnik.TcpSocket.Blocking = false;
+                        sledeciIgrac.TcpSocket.Blocking = true;
+                        sledeciIgrac.TcpSocket.Send(dataSledeci);
+                        sledeciIgrac.TcpSocket.Blocking = false;
                     }
                     catch { }
                 });
 
-                Log($"Potez prebačen na igrača {protivnik.Id}");
+                Log($"Potez prebačen na igrača {sledeciIgrac.Id}");
             }
 
             string odgovor = $"REZULTAT:{rezultat}:{(ponovnoPucanje ? "PONOVO" : "KRAJ")}";

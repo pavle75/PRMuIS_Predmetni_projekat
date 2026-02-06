@@ -372,6 +372,7 @@ namespace Client
                 }
             }
 
+            pollTimer?.Stop();
             pollTimer = new DispatcherTimer();
             pollTimer.Interval = TimeSpan.FromMilliseconds(100);
             pollTimer.Tick += async (s, e) =>
