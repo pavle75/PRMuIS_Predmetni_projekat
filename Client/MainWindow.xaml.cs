@@ -30,6 +30,7 @@ namespace Client
         private bool mojRed = true;
         private int brojPolja = 3;
         private bool igraTraje = true;
+        private int brIgraca = 0;
 
         public MainWindow()
         {
@@ -140,6 +141,10 @@ namespace Client
                 if (deo.Contains("x"))
                 {
                     dimenzija = int.Parse(deo.Split('x')[0]);
+                }
+                if (deo.Contains("!"))
+                {
+                    brIgraca = int.Parse(deo.Trim('!'));
                 }
             }
 
@@ -364,7 +369,7 @@ namespace Client
         {
             grpIgra.Visibility = Visibility.Visible;
 
-            for (int i = 1; i <= 10; i++)
+            for (int i = 1; i <= brIgraca; i++)
             {
                 if (i != mojId)
                 {

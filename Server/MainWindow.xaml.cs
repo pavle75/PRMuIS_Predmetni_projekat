@@ -162,7 +162,7 @@ namespace Server
 
         private async Task PosaljiParametreIgre()
         {
-            string poruka = $"Velicina table je {dimenzija}x{dimenzija}, posaljite brojevne vrednosti koje predstavljaju polja vasih podmornica (1 - {dimenzija * dimenzija}). Ukupno dozvoljen broj promasaja: {maxPromasaji}";
+            string poruka = $"Broj igraca je {brojIgraca}! Velicina table je {dimenzija}x{dimenzija}, posaljite brojevne vrednosti koje predstavljaju polja vasih podmornica (1 - {dimenzija * dimenzija}). Ukupno dozvoljen broj promasaja: {maxPromasaji}";
             byte[] data = Encoding.UTF8.GetBytes(poruka);
 
             foreach (var igrac in igraci)
@@ -370,7 +370,6 @@ namespace Server
 
                 Log($"Igrač {napadac.Id} -> Igrač {protivnik.Id}: polje {polje}, {rezultat}");
 
-                // FIX: Find next player in turn order (round-robin), not just the attacked player
                 napadac.Aktivan = false;
 
                 int napadacIndex = igraci.IndexOf(napadac);
