@@ -589,7 +589,7 @@ namespace Client
                 txtRezultat.Foreground = Brushes.Gray;
             }
 
-            if (mojRed)
+            if (trenutniProtivnik != -1)
             {
                 ZatraziTablu();
             }
