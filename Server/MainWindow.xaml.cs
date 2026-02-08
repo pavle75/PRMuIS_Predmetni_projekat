@@ -490,19 +490,21 @@ namespace Server
 
             var sortIgraci = igraci.OrderByDescending(obj => obj.Podmornice.Count).ToList();
             Igrac pobednik = sortIgraci[0];
-
-            for (int i = 0; i < sortIgraci.Count; i++)
+            if (pobednik.BrojPogodaka >= maxPromasaji)
             {
-                if (sortIgraci[i].BrojPromasaja < maxPromasaji)
+                for (int i = 0; i < sortIgraci.Count; i++)
                 {
-                    pobednik = sortIgraci[i];
-                    break;
+                    if (sortIgraci[i].BrojPromasaja < maxPromasaji)
+                    {
+                        pobednik = sortIgraci[i];
+                        break;
+                    }
                 }
-            }
-            if (pobednik.BrojPromasaja >= maxPromasaji)
-            {
-                sortIgraci = igraci.OrderByDescending(obj => obj.BrojPogodaka).ToList();
-                pobednik = sortIgraci[0];
+                if (pobednik.BrojPromasaja >= maxPromasaji)
+                {
+                    sortIgraci = igraci.OrderByDescending(obj => obj.BrojPogodaka).ToList();
+                    pobednik = sortIgraci[0];
+                }
             }
 
             foreach (Igrac igrac in igraci)
