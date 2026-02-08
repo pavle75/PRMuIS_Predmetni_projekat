@@ -446,9 +446,34 @@ namespace Client
                 {
                     ObradiRezultat(poruka);
                 }
-                else if (poruka.StartsWith("KRAJ:"))
+                else if (poruka.StartsWith("KRAJ"))
                 {
-                    //Kraj igre
+                    if(poruka.StartsWith("KRAJ-IGRE:"))
+                    {
+                        string[] krajDelovi = poruka.Split(',');
+                        string titula = krajDelovi[0].Split(' ')[1];
+                        string brojPogodaka = krajDelovi[1];
+
+                        txtRezultat.Text = "Vi ste " + titula + ", broj pogodaka: " + brojPogodaka;
+
+                        if(titula == "POBEDNIK")
+                        {
+                            txtRezultat.Foreground = Brushes.Green;
+                        }
+                        else
+                        {
+                            txtRezultat.Foreground = Brushes.Red;
+                        }
+                        ZatraziTablu();
+                        KrajIgre();
+                    }
+                    else
+                    {
+                        txtRezultat.Text = "Kraj igre za vas:";
+                        txtRezultat.Foreground = Brushes.Red;
+                        Log("Kraj igre za vas:");
+                        ZatraziTablu();
+                    }
                 }
             }
             catch (SocketException se)
@@ -587,12 +612,20 @@ namespace Client
             {
                 txtRezultat.Text = "Već gađano polje!";
                 txtRezultat.Foreground = Brushes.Gray;
+                mojRed = true;
             }
 
             if (trenutniProtivnik != -1)
             {
                 ZatraziTablu();
             }
+        }
+
+        private void KrajIgre()
+        {
+            igraTraje = false;
+            pollTimer?.Stop();
+            return;
         }
 
         private void Log(string poruka)

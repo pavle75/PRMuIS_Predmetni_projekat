@@ -23,6 +23,7 @@ namespace Server
         private bool serverPokrenut = false;
         private int tcpPort = 5001;
         private DispatcherTimer pollTimer;
+        private bool krajIgre = false;
 
         public MainWindow()
         {
@@ -251,19 +252,26 @@ namespace Server
             {
                 foreach (var igrac in igraci)
                 {
-                    try
+                    if (!krajIgre)
                     {
-                        if (igrac.TcpSocket.Poll(0, SelectMode.SelectRead))
+                        try
                         {
-                            if (igrac.TcpSocket.Available > 0)
+                            if (igrac.TcpSocket.Poll(0, SelectMode.SelectRead))
                             {
-                                await ObradiPoruku(igrac);
+                                if (igrac.TcpSocket.Available > 0)
+                                {
+                                    await ObradiPoruku(igrac);
+                                }
                             }
                         }
+                        catch (Exception ex)
+                        {
+                            Log($"Greška polling: {ex.Message}");
+                        }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        Log($"Greška polling: {ex.Message}");
+                        pollTimer.Stop();
                     }
                 }
             };
@@ -303,6 +311,7 @@ namespace Server
                     if (protivnik != null)
                     {
                         string tabla = GenerisiTablu(protivnik);
+                        //await SlanjeTCPPoruke(igrac,$"TABLA:{tabla}");
                         byte[] data = Encoding.UTF8.GetBytes($"TABLA:{tabla}");
                         await Task.Run(() => igrac.TcpSocket.Send(data));
                     }
@@ -343,6 +352,7 @@ namespace Server
             if (protivnik.Tabla[red, kol] != 0)
             {
                 rezultat = "VEC_GADJANO";
+                ponovnoPucanje = true;
             }
             else if (protivnik.Podmornice.Contains(polje))
             {
@@ -359,8 +369,13 @@ namespace Server
                     rezultat = "POGODIO";
                     ponovnoPucanje = true;
                 }
-
+                protivnik.Podmornice.Remove(polje);
                 Log($"Igrač {napadac.Id} -> Igrač {protivnik.Id}: polje {polje}, {rezultat}");
+                if (protivnik.Podmornice.Count == 0)
+                {
+                    await KrajIgre();
+                    Log($"Igrač {napadac.Id} je pobedio igrača {protivnik.Id}");
+                }
             }
             else
             {
@@ -369,42 +384,23 @@ namespace Server
                 rezultat = "PROMASIO";
 
                 Log($"Igrač {napadac.Id} -> Igrač {protivnik.Id}: polje {polje}, {rezultat}");
-
-                napadac.Aktivan = false;
-
-                int napadacIndex = igraci.IndexOf(napadac);
-                int sledeciIndex = (napadacIndex + 1) % igraci.Count;
-                var sledeciIgrac = igraci[sledeciIndex];
-                sledeciIgrac.Aktivan = true;
-
-                string porukaSledeceg = "TVOJ_POTEZ";
-                byte[] dataSledeci = Encoding.UTF8.GetBytes(porukaSledeceg);
-                await Task.Run(() =>
+                if (napadac.BrojPromasaja >= maxPromasaji)
                 {
-                    try
-                    {
-                        sledeciIgrac.TcpSocket.Blocking = true;
-                        sledeciIgrac.TcpSocket.Send(dataSledeci);
-                        sledeciIgrac.TcpSocket.Blocking = false;
-                    }
-                    catch { }
-                });
+                    await KrajIgre();
+                    Log($"Igrač {napadac.Id} je potrošio sve dozvoljene poteze");
+                }
+                else
+                {
+                    await SledeciIgracPotez(napadac);
+                }
 
-                Log($"Potez prebačen na igrača {sledeciIgrac.Id}");
+            }
+            if (!krajIgre)
+            {
+                string odgovor = $"REZULTAT:{rezultat}:{(ponovnoPucanje ? "PONOVO" : "KRAJ")}";
+                await SlanjeTCPPoruke(napadac, odgovor);
             }
 
-            string odgovor = $"REZULTAT:{rezultat}:{(ponovnoPucanje ? "PONOVO" : "KRAJ")}";
-            byte[] data = Encoding.UTF8.GetBytes(odgovor);
-            await Task.Run(() =>
-            {
-                try
-                {
-                    napadac.TcpSocket.Blocking = true;
-                    napadac.TcpSocket.Send(data);
-                    napadac.TcpSocket.Blocking = false;
-                }
-                catch { }
-            });
         }
 
         private bool JePotopljena(Igrac igrac, int polje)
@@ -474,9 +470,86 @@ namespace Server
             });
         }
 
-        private void BtnZaustavi_Click(object sender, RoutedEventArgs e)
+        private async Task SlanjeTCPPoruke(Igrac igrac, string poruka)
+        {
+            byte[] data = Encoding.UTF8.GetBytes(poruka);
+            await Task.Run(() =>
+            {
+                try
+                {
+                    igrac.TcpSocket.Blocking = true;
+                    igrac.TcpSocket.Send(data);
+                    igrac.TcpSocket.Blocking = false;
+                }
+                catch { }
+            });
+        }
+
+        private async Task KrajIgre()
         {
 
+            var sortIgraci = igraci.OrderByDescending(obj => obj.Podmornice.Count).ToList();
+            Igrac pobednik = sortIgraci[0];
+
+            for (int i = 0; i < sortIgraci.Count; i++)
+            {
+                if (sortIgraci[i].BrojPromasaja < maxPromasaji)
+                {
+                    pobednik = sortIgraci[i];
+                    break;
+                }
+            }
+            if (pobednik.BrojPromasaja >= maxPromasaji)
+            {
+                sortIgraci = igraci.OrderByDescending(obj => obj.BrojPogodaka).ToList();
+            }
+
+            foreach (Igrac igrac in igraci)
+            {
+                string odgovor = $"KRAJ-IGRE: {((igrac.Id == pobednik.Id) ? "POBEDNIK" : "GUBITNIK")},{igrac.BrojPogodaka}";
+                await SlanjeTCPPoruke(igrac, odgovor);
+            }
+            krajIgre = true;
+
+            Log("Rang lista:");
+            Log("-----------------------------------------------------------------------------");
+
+            foreach (Igrac igrac in sortIgraci)
+            {
+                Log($"Igrac: {igrac.Id}, broj podmornica: {igrac.Podmornice.Count}, broj pogodaka: {igrac.BrojPogodaka}");
+            }
+            Log("-----------------------------------------------------------------------------");
+            ZatvoriIgru();
+        }
+
+        private async Task SledeciIgracPotez(Igrac trenutniIgrac)
+        {
+            trenutniIgrac.Aktivan = false;
+            int napadacIndex = igraci.IndexOf(trenutniIgrac);
+            int sledeciIndex = (napadacIndex + 1) % igraci.Count;
+            var sledeciIgrac = igraci[sledeciIndex];
+            sledeciIgrac.Aktivan = true;
+            await SlanjeTCPPoruke(sledeciIgrac, "TVOJ_POTEZ");
+            Log($"Potez prebačen na igrača {sledeciIgrac.Id}");
+        }
+
+        private void ZatvoriIgru()
+        {
+            try
+            {
+                foreach (Igrac igrac in igraci)
+                {
+                    igrac.TcpSocket.Close();
+                }
+                tcpSocket.Close();
+            }
+            catch { }
+        }
+
+        private void BtnZaustavi_Click(object sender, RoutedEventArgs e)
+        {
+            ZatvoriIgru();
+            this.Close();
         }
     }
 }
