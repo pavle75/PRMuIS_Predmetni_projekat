@@ -502,6 +502,7 @@ namespace Server
             if (pobednik.BrojPromasaja >= maxPromasaji)
             {
                 sortIgraci = igraci.OrderByDescending(obj => obj.BrojPogodaka).ToList();
+                pobednik = sortIgraci[0];
             }
 
             foreach (Igrac igrac in igraci)
