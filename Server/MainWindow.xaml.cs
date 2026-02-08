@@ -144,10 +144,22 @@ namespace Server
                 for (int i = 0; i < brojIgraca; i++)
                 {
                     Socket clientSocket = await Task.Run(() => tcpSocket.Accept());
-                    igraci[i].TcpSocket = clientSocket;
-                    clientSocket.Blocking = false;
 
-                    Log($"Igrač {igraci[i].Id} povezan preko TCP-a");
+                    // Primi ID od klijenta
+                    byte[] buffer = new byte[64];
+                    clientSocket.Blocking = true;
+                    int bytesRead = clientSocket.Receive(buffer);
+                    string idStr = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                    int clientId = int.Parse(idStr);
+
+                    // Dodeli socket pravom igraču
+                    var igrac = igraci.FirstOrDefault(ig => ig.Id == clientId);
+                    if (igrac != null)
+                    {
+                        igrac.TcpSocket = clientSocket;
+                        clientSocket.Blocking = false;
+                        Log($"Igrač {igrac.Id} povezan preko TCP-a");
+                    }
                 }
 
                 await PosaljiParametreIgre();
@@ -490,8 +502,10 @@ namespace Server
 
             var sortIgraci = igraci.OrderByDescending(obj => obj.Podmornice.Count).ToList();
             Igrac pobednik = sortIgraci[0];
+
             if (pobednik.BrojPromasaja >= maxPromasaji)
             {
+                pobednik = null;
                 for (int i = 0; i < sortIgraci.Count; i++)
                 {
                     if (sortIgraci[i].BrojPromasaja < maxPromasaji)

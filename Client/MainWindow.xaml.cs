@@ -100,6 +100,9 @@ namespace Client
 
                 await Task.Run(() => tcpSocket.Connect(serverEndPoint));
 
+                byte[] idData = Encoding.UTF8.GetBytes(mojId.ToString());
+                await Task.Run(() => tcpSocket.Send(idData));
+
                 tcpSocket.Blocking = false;
 
                 Log("Povezan sa TCP serverom");
@@ -448,7 +451,7 @@ namespace Client
                 }
                 else if (poruka.StartsWith("KRAJ"))
                 {
-                    if(poruka.StartsWith("KRAJ-IGRE:"))
+                    if (poruka.StartsWith("KRAJ-IGRE:"))
                     {
                         string[] krajDelovi = poruka.Split(',');
                         string titula = krajDelovi[0].Split(' ')[1];
@@ -456,7 +459,7 @@ namespace Client
 
                         txtRezultat.Text = "Vi ste " + titula + ", broj pogodaka: " + brojPogodaka;
 
-                        if(titula == "POBEDNIK")
+                        if (titula == "POBEDNIK")
                         {
                             txtRezultat.Foreground = Brushes.Green;
                         }
